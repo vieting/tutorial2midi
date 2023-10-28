@@ -1,5 +1,5 @@
 """
-Wrapper class for MIDI file.
+MIDI helpers.
 """
 import pandas as pd
 import tqdm
@@ -7,6 +7,9 @@ from midiutil import MIDIFile
 
 
 class MIDIWrapper:
+    """
+    Wrapper class for MIDI.
+    """
     def __init__(self, tempo: int = 100):
         """
         :param tempo: in bpm
