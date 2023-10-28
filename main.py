@@ -4,13 +4,18 @@ Main entry point for tutorial2midi
 import argparse
 import pandas as pd
 
-from tutorial2midi import MIDIWrapper
+from tutorial2midi import Video, MIDIWrapper
 
 
-def main(filename: str):
+def main(video_filename: str, midi_filename: str = None):
     """
     Main function for conversion.
     """
+    if midi_filename is None:
+        midi_filename = video_filename.replace(".mp4", ".midi")
+
+    video = Video(video_filename)
+
     midi = MIDIWrapper()
     tmp = pd.DataFrame(
         [
@@ -23,13 +28,14 @@ def main(filename: str):
         list(range(5))
     )
     midi.add_keys(tmp)
-    midi.write_to_file(filename)
+    midi.write_to_file(midi_filename)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("filename", help="filename of mp4 video")
+    parser.add_argument("video_filename", help="filename of mp4 video")
+    parser.add_argument("--midi_filename", help="filename of mp4 video", default=None)
 
     args = parser.parse_args()
     main(**vars(args))

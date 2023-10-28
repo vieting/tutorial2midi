@@ -1,4 +1,6 @@
 argparse
+imageio
 midiutil
+numpy
 pandas
 tqdm
