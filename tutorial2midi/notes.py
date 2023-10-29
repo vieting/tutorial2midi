@@ -1,11 +1,13 @@
 """
 Functions to extract notes.
 """
+from __future__ import annotations
 import cv2
 import numpy as np
 import pandas as pd
 from typing import Optional
 
+from .midi import MIDIWrapper
 from .video import Video
 
 
@@ -14,8 +16,9 @@ class Keyboard:
     Wrapper class for actions regarding the keyboard in the video.
     """
     def __init__(self, ref_stripe: np.ndarray):
-        self._ref_stripe = ref_stripe
-        self._keys = {}
+        self._ref_stripe = ref_stripe  # shape (width, rgb)
+        self._key_borders = {}
+        self._keys = np.zeros(ref_stripe.shape[0])  # shape (width,)
         self.init_keys()
 
     def init_keys(self):
@@ -31,10 +34,18 @@ class Keyboard:
             if borders[idx] and any(borders[idx + 1:idx + 3]):  # remove double borders
                 borders[idx] = False
             if borders[idx]:
-                self._keys[key] = (border, idx)
+                self._key_borders[key] = (border, idx)
                 key += 1
                 border = idx + 1
-        self._keys[key] = (border, borders.size)
+        self._key_borders[key] = (border, borders.size)
+        for key, borders in self._key_borders.items():
+            self._keys[borders[0]:borders[1] + 1] = key
+
+    def pixel_to_key(self, pixel: int) -> int:
+        """
+        Get key for given pixel.
+        """
+        return int(self._keys[pixel])
 
     def visualize_ref_keyboard_with_borders(
             self,
@@ -53,6 +64,7 @@ class Keyboard:
             if pianoroll.ndim == 2:
                 pianoroll = np.repeat(pianoroll[:, None, :], 3, axis=1)
             pianoroll_image = pianoroll
+            # cv2.imwrite(filename.replace(".png", "pianoroll.png"), pianoroll.transpose(2, 0, 1)[::-1, :, :])
         if pianoroll_activity is not None:
             if pianoroll_activity.ndim == 2:
                 pianoroll_activity = np.repeat(pianoroll_activity[:, None, :], 3, axis=1)
@@ -65,119 +77,132 @@ class Keyboard:
             for frame in range(active_keys.shape[0]):
                 for key in range(active_keys.shape[1]):
                     if active_keys[frame, key]:
-                        active_keys_image[frame, self._keys[key][0]:self._keys[key][1], 1] = 255  # color green
+                        active_keys_image[frame, self._key_borders[key][0]:self._key_borders[key][1], 1] = 255  # color green
             image = np.concatenate([image, sep_stripe, active_keys_image[::-1, :, :]], axis=0)
-        for key in self._keys.values():  # red border lines
+        for key in self._key_borders.values():  # red border lines
             image[:, key[0], -1] = 255
             image[:, key[1], -1] = 255
         cv2.imwrite(filename, image)
 
-    def get_active_keys(self, pianoroll: np.ndarray) -> np.ndarray:
+
+class Pianoroll:
+    """
+    Wrapper class for pianoroll in tutorial.
+    """
+    def __init__(self, pianoroll: np.ndarray):
+        self.pianoroll = pianoroll.transpose(2, 0, 1)  # shape (frames, width, rgb)
+
+    def get_notes_pixel(self) -> np.ndarray:
         """
-        Detect areas of activity per key.
+        Get notes from the pianoroll. Notes are represented by their pixel position.
         """
-        active_keys = np.zeros((pianoroll.shape[-1], len(self._keys)), bool)
-        for key, borders in self._keys.items():
-            active_keys[:, key] = pianoroll[borders[0]:borders[1], ...].any(axis=0)
-        return active_keys
+        gray = cv2.cvtColor(self.pianoroll, cv2.COLOR_BGR2GRAY)  # (height, width, bgr)
 
+        _, thresh = cv2.threshold(gray, 30, 255, 0)
+        contours, _ = cv2.findContours(thresh, 1, 2)
 
-def get_range_borders(array: np.ndarray) -> list:
-    """
-    Find indices of borders of ranges in array. E.g. [0, 0, 1, 1, 1, 0, 1, 1] -> [(2, 4), (6, 7)]
-    """
-    assert len(array.shape) == 1
-    idx = 0
-    borders = []
-    while idx < array.size:
-        while idx < array.size and not array[idx]:
-            idx += 1
-        if idx == array.size:
-            break
-        left = idx
-        while idx < array.size and array[idx]:
-            idx += 1
-        right = idx
-        borders.append((left, right))
-        idx += 1
-    return borders
+        box_widths = []
+        for idx, cnt in enumerate(contours):
+            x, y, w, h = cv2.boundingRect(cnt)
+            if w > 5:  # sort out very narrow boxes
+                box_widths.append(w)
 
+        white_key_width = int(np.argmax(np.bincount(box_widths)))  # most common value
+        black_key_width = 0.55 * white_key_width  # approximation
 
-def process_pianoroll(pianoroll: np.ndarray) -> np.ndarray:
-    """
-    Process pianoroll video
+        note_boxes = []
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            if np.abs(w / white_key_width - 1) < 0.2:  # white key
+                note_boxes.append((x, y, w, h))
+            elif np.abs(w / black_key_width - 1) < 0.2:  # black key
+                note_boxes.append((x, y, w, h))
+            elif np.abs(w / (2 * white_key_width) - 1) % 1 < 0.2:  # probably two white keys next to each other
+                area = gray.copy()[y:y + h, x:x + w]
+                threshold = area.mean()
+                offset = (w - 2 * white_key_width) // 2
+                for key in range(2):
+                    middle_idx = white_key_width // 2 + key * white_key_width + offset
+                    key_activity = area[:, middle_idx] > threshold
+                    key_activity[0] = False
+                    key_activity[-1] = False
+                    starts = np.flatnonzero(~key_activity[:-1] & key_activity[1:])
+                    ends = np.flatnonzero(key_activity[:-1] & ~key_activity[1:])
+                    for start, end in zip(starts, ends):
+                        note_boxes.append((x + key * white_key_width + offset, y + start, white_key_width, end - start))
 
-    Return shape (width, #frames)
-    """
-    pianoroll = pianoroll.mean(axis=1)
-    threshold = pianoroll.mean() * 3
-    pianoroll = pianoroll > threshold
+        img_marked = self.pianoroll.copy()
+        for note_box in note_boxes:
+            x, y, w, h = note_box
+            img_marked = cv2.rectangle(img_marked, (x, y), (x + w, y + h), (0, 255, 0), 1)
+        cv2.imwrite("images/detected_notes.png", img_marked[::-1, :, :])
 
-    # morphological opening
-    pianoroll = cv2.morphologyEx(pianoroll.astype("uint8"), cv2.MORPH_OPEN, np.ones((5,5)))
-
-    # reduce each note to center
-    for frame in range(pianoroll.shape[1]):
-        idx = 0
-        while idx < pianoroll.shape[0]:
-            while idx < pianoroll.shape[0] and not pianoroll[idx, frame]:
-                idx += 1
-            left = idx
-            while idx < pianoroll.shape[0] and pianoroll[idx, frame]:
-                idx += 1
-            right = idx
-            if right > left:
-                pianoroll[left:right, frame] = False
-                pianoroll[left + (right - left) // 2, frame] = True
-            idx += 1
-    return pianoroll
-
-
-def get_notes_from_video(
-        video: Video,
-        tempo: int,
-        quantization: int,
-        key_offset: int = 21,
-        right_hand_boundary: int = 60,
-        anacrusis: float = 0.0,
-) -> pd.DataFrame:
-    """
-    Extract notes from the video.
-    """
-    video.visualize_video("images/keyboard_regions.png")
-    keyboard_video = video.get_keyboard_stripe()  # shape (width, rgb, frames)
-    pianoroll_video = video.get_pianoroll_stripe()  # shape (width, rgb, frames)
-    keyboard = Keyboard(keyboard_video.mean(axis=-1))
-
-    pianoroll_video_proc = process_pianoroll(pianoroll_video)  # shape (width, frames)
-    active_keys = keyboard.get_active_keys(pianoroll_video_proc)  # shape (frames, keys)
-
-    keyboard.visualize_ref_keyboard_with_borders(
-        "images/keyboard_pianoroll.png",
-        pianoroll_video,
-        pianoroll_video_proc,
-        active_keys,
-    )
-
-    notes = []
-    for key in range(active_keys.shape[1]):
-        for borders in get_range_borders(active_keys[:, key]):
+        notes = []
+        for note_box in note_boxes:
+            x, y, w, h = note_box
             notes.append({
-                "hand": "right" if key + key_offset >= right_hand_boundary else "left",
-                "key": key + key_offset,
-                "start": borders[0],
-                "duration": borders[1] - borders[0],
+                "hand": "right",
+                "key": x + w // 2,
+                "start": y,
+                "duration": h,
             })
-    notes = pd.DataFrame(notes, list(range(len(notes))))
+        notes = pd.DataFrame(notes, list(range(len(notes))))
+        return notes
 
-    # post process notes
-    notes = notes.sort_values("start")
-    notes.start -= notes.start.min()
-    notes.start = notes.start / video.frame_rate * tempo / 60
-    notes.duration = notes.duration / video.frame_rate * tempo / 60
-    quantization /= 4
-    notes.start = np.round(notes.start * quantization) / quantization
-    notes.duration = np.round(notes.duration * quantization) / quantization
-    notes = notes[notes.duration > 0]
-    notes.start += 4 * (anacrusis // 4 + 1) - anacrusis
-    return notes
+
+class Notes:
+    """
+    Wrapper class for notes.
+    """
+    def __init__(self, notes: pd.DataFrame, tempo: int):
+        self._notes = notes.copy()
+        self._notes_proc = notes.copy()
+        self._tempo = tempo
+
+    @classmethod
+    def from_video(
+            cls,
+            video: Video,
+            tempo: int,
+            key_offset: int = 21,
+            right_hand_boundary: int = 60,
+    ) -> Notes:
+        """
+        Extract notes from the video.
+        """
+        # video.visualize_video("images/keyboard_regions.png")
+        keyboard_video = video.get_keyboard_stripe()  # shape (width, rgb, frames)
+        pianoroll_video = video.get_pianoroll_stripe()  # shape (width, rgb, frames)
+        keyboard = Keyboard(keyboard_video.mean(axis=-1))
+
+        pianoroll = Pianoroll(pianoroll_video)
+        notes = pianoroll.get_notes_pixel()
+        notes.start = notes.start / video.frame_rate * tempo / 60
+        notes.duration = notes.duration / video.frame_rate * tempo / 60
+        notes.key = notes.key.map(keyboard.pixel_to_key) + key_offset
+        if right_hand_boundary:
+            notes.hand = "right"
+            notes.hand = notes.hand.where(notes.key >= right_hand_boundary, "left")
+        return cls(notes, tempo)
+
+    def post_process(self, quantization: Optional[int] = None, anacrusis: float = 0.0):
+        """
+        Post process notes.
+        """
+        notes = self._notes.sort_values("start")
+        notes.start -= notes.start.min()
+        if quantization:
+            quantization /= 4
+            notes.start = np.round(notes.start * quantization) / quantization
+            notes.duration = np.round(notes.duration * quantization) / quantization
+        notes = notes[notes.duration > 0]
+        notes.start += 4 * (anacrusis // 4 + 1) - anacrusis
+        self._notes_proc = notes
+
+    def write_to_midi_file(self, filename: str):
+        """
+        Write processed notes to midi file.
+        """
+        midi = MIDIWrapper(self._tempo)
+        midi.add_notes(self._notes_proc)
+        midi.write_to_file(filename)

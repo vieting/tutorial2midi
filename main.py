@@ -2,11 +2,19 @@
 Main entry point for tutorial2midi
 """
 import argparse
+from typing import Optional
 
-from tutorial2midi import Video, MIDIWrapper, get_notes_from_video
+from tutorial2midi import Video, Notes
 
 
-def main(video_filename: str, midi_filename: str, tempo: int, **kwargs):
+def main(
+        video_filename: str,
+        midi_filename: str,
+        tempo: int,
+        quantization: Optional[int] = None,
+        anacrusis: float = 0.0,
+        **kwargs,
+):
     """
     Main function for conversion.
     """
@@ -16,9 +24,9 @@ def main(video_filename: str, midi_filename: str, tempo: int, **kwargs):
     video = Video(video_filename)
     notes = get_notes_from_video(video, tempo, **kwargs)
 
-    midi = MIDIWrapper(tempo)
-    midi.add_notes(notes)
-    midi.write_to_file(midi_filename)
+    notes = Notes.from_video(video, tempo, **kwargs)
+    notes.post_process(quantization, anacrusis)
+    notes.write_to_midi_file(midi_filename)
 
 
 if __name__ == "__main__":
