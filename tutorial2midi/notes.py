@@ -4,6 +4,7 @@ Functions to extract notes.
 import cv2
 import numpy as np
 import pandas as pd
+from typing import Optional
 
 from .video import Video
 
@@ -35,7 +36,7 @@ class Keyboard:
                 border = idx + 1
         self._keys[key] = (border, borders.size)
 
-    def visualize_ref_keyboard_with_borders(self, filename: str, pianoroll: np.ndarray):
+    def visualize_ref_keyboard_with_borders(self, filename: str, pianoroll: Optional[np.ndarray] = None):
         """
         Helper to plot the keyboard along with the detected borders to help debugging.
         """
@@ -115,6 +116,7 @@ def get_notes_from_video(video: Video, tempo: int, quantization: int) -> pd.Data
     """
     Extract notes from the video.
     """
+    video.visualize_video("images/keyboard_regions.png")
     keyboard_video = video.get_keyboard_stripe()
     pianoroll_video = video.get_pianoroll_stripe()
     keyboard = Keyboard(keyboard_video.mean(axis=-1))
