@@ -152,9 +152,15 @@ def get_notes_from_video(video: Video, tempo: int, quantization: int) -> pd.Data
     )
 
     notes = []
+    key_offset = 21
     for key in range(active_keys.shape[1]):
         for borders in get_range_borders(active_keys[:, key]):
-            notes.append({"hand": "right", "key": key + 22, "start": borders[0], "duration": borders[1] - borders[0]})
+            notes.append({
+                "hand": "right",
+                "key": key + key_offset,
+                "start": borders[0],
+                "duration": borders[1] - borders[0],
+            })
     notes = pd.DataFrame(notes, list(range(len(notes))))
 
     # post process notes
