@@ -109,7 +109,7 @@ def process_pianoroll(pianoroll: np.ndarray) -> np.ndarray:
     Return shape (width, #frames)
     """
     pianoroll = pianoroll.mean(axis=1)
-    threshold = pianoroll.mean() * 4
+    threshold = pianoroll.mean() * 3
     pianoroll = pianoroll > threshold
 
     # morphological opening
