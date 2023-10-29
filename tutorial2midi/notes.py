@@ -132,7 +132,7 @@ def process_pianoroll(pianoroll: np.ndarray) -> np.ndarray:
     return pianoroll
 
 
-def get_notes_from_video(video: Video, tempo: int, quantization: int) -> pd.DataFrame:
+def get_notes_from_video(video: Video, tempo: int, quantization: int, key_offset: int = 21) -> pd.DataFrame:
     """
     Extract notes from the video.
     """
@@ -152,7 +152,6 @@ def get_notes_from_video(video: Video, tempo: int, quantization: int) -> pd.Data
     )
 
     notes = []
-    key_offset = 21
     for key in range(active_keys.shape[1]):
         for borders in get_range_borders(active_keys[:, key]):
             notes.append({
