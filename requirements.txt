@@ -1,6 +1,8 @@
 argparse
+cv2
 imageio
 midiutil
 numpy
 pandas
 tqdm
+typing
