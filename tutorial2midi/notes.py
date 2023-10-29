@@ -111,11 +111,10 @@ def process_pianoroll(pianoroll: np.ndarray) -> np.ndarray:
     return pianoroll
 
 
-def get_notes_from_video(video: Video, tempo: int) -> pd.DataFrame:
+def get_notes_from_video(video: Video, tempo: int, quantization: int) -> pd.DataFrame:
     """
     Extract notes from the video.
     """
-    notes = pd.DataFrame(columns=["key", "start", "duration", "hand"])
     keyboard_video = video.get_keyboard_stripe()
     pianoroll_video = video.get_pianoroll_stripe()
     keyboard = Keyboard(keyboard_video.mean(axis=-1))
@@ -135,6 +134,10 @@ def get_notes_from_video(video: Video, tempo: int) -> pd.DataFrame:
     notes.start -= notes.start.min()
     notes.start = notes.start / video.frame_rate * tempo / 60
     notes.duration = notes.duration / video.frame_rate * tempo / 60
+    quantization /= 4
+    notes.start = np.round(notes.start * quantization) / quantization
+    notes.duration = np.round(notes.duration * quantization) / quantization
+    notes = notes[notes.duration > 0]
     # import ipdb
     # ipdb.set_trace()
     return notes
