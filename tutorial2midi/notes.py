@@ -47,6 +47,12 @@ class Keyboard:
         """
         return int(self._keys[pixel])
 
+    def key_to_pixels(self, key: int) -> np.ndarray:
+        """
+        Get array with the active pixels for a given key.
+        """
+        return self._keys == key
+
     def visualize_ref_keyboard_with_borders(
             self,
             filename: str,
@@ -84,20 +90,35 @@ class Keyboard:
             image[:, key[1], -1] = 255
         cv2.imwrite(filename, image)
 
+    def add_keyboard_to_image(self, img: np.ndarray, add_borders: bool = True) -> np.ndarray:
+        """
+        Add keyboard to pianoroll image.
+        """
+        keyboard_img = np.repeat(self._ref_stripe[None, ...], 100, axis=0)
+        sep_stripe = np.ones((1, img.shape[1], 3)) * 150
+        img = np.concatenate([keyboard_img, sep_stripe, img], axis=0)
+        if add_borders:
+            for key in self._key_borders.values():  # gray border lines
+                img[:, key[0], :] = 150
+                img[:, key[1], :] = 150
+        return img
+
 
 class Pianoroll:
     """
     Wrapper class for pianoroll in tutorial.
     """
-    def __init__(self, pianoroll: np.ndarray):
+    def __init__(self, pianoroll: np.ndarray, frame_rate: float):
         self.pianoroll = pianoroll.transpose(2, 0, 1)  # shape (frames, width, rgb)
+        self.note_boxes = []  # list of detected note boxes
+        self._detect_notes()
+        self.frame_rate = frame_rate
 
-    def get_notes_pixel(self) -> np.ndarray:
+    def _detect_notes(self) -> np.ndarray:
         """
-        Get notes from the pianoroll. Notes are represented by their pixel position.
+        Detect notes in the pianoroll.
         """
         gray = cv2.cvtColor(self.pianoroll, cv2.COLOR_BGR2GRAY)  # (height, width, bgr)
-
         _, thresh = cv2.threshold(gray, 30, 255, 0)
         contours, _ = cv2.findContours(thresh, 1, 2)
 
@@ -110,13 +131,12 @@ class Pianoroll:
         white_key_width = int(np.argmax(np.bincount(box_widths)))  # most common value
         black_key_width = 0.55 * white_key_width  # approximation
 
-        note_boxes = []
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
             if np.abs(w / white_key_width - 1) < 0.2:  # white key
-                note_boxes.append((x, y, w, h))
+                self.note_boxes.append((x, y, w, h))
             elif np.abs(w / black_key_width - 1) < 0.2:  # black key
-                note_boxes.append((x, y, w, h))
+                self.note_boxes.append((x, y, w, h))
             elif np.abs(w / (2 * white_key_width) - 1) % 1 < 0.2:  # probably two white keys next to each other
                 area = gray.copy()[y:y + h, x:x + w]
                 threshold = area.mean()
@@ -129,16 +149,16 @@ class Pianoroll:
                     starts = np.flatnonzero(~key_activity[:-1] & key_activity[1:])
                     ends = np.flatnonzero(key_activity[:-1] & ~key_activity[1:])
                     for start, end in zip(starts, ends):
-                        note_boxes.append((x + key * white_key_width + offset, y + start, white_key_width, end - start))
+                        self.note_boxes.append(
+                            (x + key * white_key_width + offset, y + start, white_key_width, end - start)
+                        )
 
-        img_marked = self.pianoroll.copy()
-        for note_box in note_boxes:
-            x, y, w, h = note_box
-            img_marked = cv2.rectangle(img_marked, (x, y), (x + w, y + h), (0, 255, 0), 1)
-        cv2.imwrite("images/detected_notes.png", img_marked[::-1, :, :])
-
+    def get_notes_pixel(self) -> np.ndarray:
+        """
+        Get notes from the pianoroll. Notes are represented by their pixel position.
+        """
         notes = []
-        for note_box in note_boxes:
+        for note_box in self.note_boxes:
             x, y, w, h = note_box
             notes.append({
                 "hand": "right",
@@ -149,15 +169,47 @@ class Pianoroll:
         notes = pd.DataFrame(notes, list(range(len(notes))))
         return notes
 
+    def get_image(self, note_boxes: bool = True) -> np.ndarray:
+        """
+        Return pianoroll image.
+        """
+        img = self.pianoroll.copy()
+        if note_boxes:
+            img = self.add_boxes_to_image(img)
+        return img
+
+    def add_boxes_to_image(self, img: np.ndarray) -> np.ndarray:
+        """
+        Add detected boxes to given pianoroll image.
+        """
+        for note_box in self.note_boxes:
+            x, y, w, h = note_box
+            img = cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 1)
+        return img
+
 
 class Notes:
     """
     Wrapper class for notes.
     """
-    def __init__(self, notes: pd.DataFrame, tempo: int):
+    def __init__(self, notes: pd.DataFrame, tempo: int, key_offset: int):
         self._notes = notes.copy()
         self._notes_proc = notes.copy()
         self._tempo = tempo
+        self._key_offset = key_offset
+
+    def add_notes_to_image(self, img: np.ndarray, keyboard: Keyboard, frame_rate: float) -> np.ndarray:
+        """
+        Add detected notes to pianoroll image.
+        Note that notes need to have start and end in frames, not seconds or beats.
+        """
+        for _, note in self._notes.iterrows():
+            # add red color shade
+            start = int(note.start * 60 / self._tempo * frame_rate)
+            duration = int(note.duration * 60 / self._tempo * frame_rate)
+            color_shade = (keyboard.key_to_pixels(note.key - self._key_offset) * 100).astype("uint8")
+            img[start:start + duration, :, 2] += color_shade
+        return img
 
     @classmethod
     def from_video(
@@ -170,12 +222,12 @@ class Notes:
         """
         Extract notes from the video.
         """
-        # video.visualize_video("images/keyboard_regions.png")
+        video.visualize_video("images/keyboard_regions.png")
         keyboard_video = video.get_keyboard_stripe()  # shape (width, rgb, frames)
         pianoroll_video = video.get_pianoroll_stripe()  # shape (width, rgb, frames)
         keyboard = Keyboard(keyboard_video.mean(axis=-1))
 
-        pianoroll = Pianoroll(pianoroll_video)
+        pianoroll = Pianoroll(pianoroll_video, video.frame_rate)
         notes = pianoroll.get_notes_pixel()
         notes.start = notes.start / video.frame_rate * tempo / 60
         notes.duration = notes.duration / video.frame_rate * tempo / 60
@@ -183,7 +235,11 @@ class Notes:
         if right_hand_boundary:
             notes.hand = "right"
             notes.hand = notes.hand.where(notes.key >= right_hand_boundary, "left")
-        return cls(notes, tempo)
+
+        notes_obj = cls(notes, tempo, key_offset)
+        img = TutorialImage(keyboard, pianoroll, notes_obj)
+        img.write_to_file("images/detected_notes.png")
+        return notes_obj
 
     def post_process(self, quantization: Optional[int] = None, anacrusis: float = 0.0):
         """
@@ -191,12 +247,13 @@ class Notes:
         """
         notes = self._notes.sort_values("start")
         notes.start -= notes.start.min()
+        notes.start += 4 * (anacrusis // 4 + 1) - anacrusis
+
         if quantization:
             quantization /= 4
             notes.start = np.round(notes.start * quantization) / quantization
             notes.duration = np.round(notes.duration * quantization) / quantization
         notes = notes[notes.duration > 0]
-        notes.start += 4 * (anacrusis // 4 + 1) - anacrusis
         self._notes_proc = notes
 
     def write_to_midi_file(self, filename: str):
@@ -206,3 +263,23 @@ class Notes:
         midi = MIDIWrapper(self._tempo)
         midi.add_notes(self._notes_proc)
         midi.write_to_file(filename)
+
+
+class TutorialImage:
+    """
+    Helper class to create images of a tutorial.
+    """
+    def __init__(self, keyboard: Keyboard, pianoroll: Pianoroll, notes: Notes):
+        self.keyboard = keyboard
+        self.pianoroll = pianoroll
+        self.notes = notes
+
+        self._img = pianoroll.get_image()
+        self._img = notes.add_notes_to_image(self._img, keyboard, pianoroll.frame_rate)
+        self._img = keyboard.add_keyboard_to_image(self._img)
+
+    def write_to_file(self, filename: str):
+        """
+        Write image to file.
+        """
+        cv2.imwrite(filename, self._img[::-1, :, :])
