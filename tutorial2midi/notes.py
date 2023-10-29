@@ -5,7 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 import pandas as pd
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 from .midi import MIDIWrapper
 from .video import Video
@@ -15,17 +15,29 @@ class Keyboard:
     """
     Wrapper class for actions regarding the keyboard in the video.
     """
-    def __init__(self, ref_stripe: np.ndarray):
+    def __init__(self, ref_stripe: np.ndarray, ref_stripe_white: np.ndarray):
         self._ref_stripe = ref_stripe  # shape (width, rgb)
-        self._key_borders = {}
-        self._keys = np.zeros(ref_stripe.shape[0])  # shape (width,)
-        self.init_keys()
+        self._keys, self._key_borders = self.get_keys_and_borders(ref_stripe)  # keys shape (width,)
+        self._key_matrix = (self._keys[:, None] == np.array(range(self._keys.max()))[None, :]).astype(int)
+        self._ref_stripe_white = ref_stripe_white  # shape (width, rgb)
+        self._keys_white, self._key_borders_white = self.get_keys_and_borders(ref_stripe_white)  # keys shape (width,)
+        self._key_matrix_white = (
+                self._keys_white[:, None] == np.array(range(self._keys_white.max()))[None, :]).astype(int)
 
-    def init_keys(self):
+        self._white_to_real_key = {}
+        for key, borders in self._key_borders.items():
+            if self.is_white_key(key):
+                white_key = int(self._keys_white[int(np.mean(borders))])
+                self._white_to_real_key[white_key] = key
+
+    @staticmethod
+    def get_keys_and_borders(ref_stripe: np.ndarray) -> Tuple[np.ndarray, Dict]:
         """
         Find the borders for each key of the keyboard.
         """
-        stripe = self._ref_stripe.mean(axis=-1)
+        keys = np.zeros(ref_stripe.shape[0], dtype=int)
+        key_borders = {}
+        stripe = ref_stripe.mean(axis=-1)
         deltas = np.abs(np.diff(stripe))
         borders = deltas > 2 * np.mean(deltas)
         key = 0
@@ -34,12 +46,13 @@ class Keyboard:
             if borders[idx] and any(borders[idx + 1:idx + 3]):  # remove double borders
                 borders[idx] = False
             if borders[idx]:
-                self._key_borders[key] = (border, idx)
+                key_borders[key] = (border, idx)
                 key += 1
                 border = idx + 1
-        self._key_borders[key] = (border, borders.size)
-        for key, borders in self._key_borders.items():
-            self._keys[borders[0]:borders[1] + 1] = key
+        key_borders[key] = (border, borders.size)
+        for key, borders in key_borders.items():
+            keys[borders[0]:borders[1] + 1] = key
+        return keys, key_borders
 
     def pixel_to_key(self, pixel: int) -> int:
         """
@@ -53,42 +66,30 @@ class Keyboard:
         """
         return self._keys == key
 
-    def visualize_ref_keyboard_with_borders(
-            self,
-            filename: str,
-            pianoroll: Optional[np.ndarray] = None,
-            pianoroll_activity: Optional[np.ndarray] = None,
-            active_keys: Optional[np.ndarray] = None,
-    ):
+    def note_box_to_key(self, start: int, width: int) -> int:
         """
-        Helper to plot the keyboard along with the detected borders to help debugging.
+        Get key for given box.
         """
-        image = np.repeat(self._ref_stripe[None, ...], 100, axis=0)
-        sep_stripe = np.ones((1, image.shape[1], 3)) * 255
-        pianoroll_image = None
-        if pianoroll is not None:
-            if pianoroll.ndim == 2:
-                pianoroll = np.repeat(pianoroll[:, None, :], 3, axis=1)
-            pianoroll_image = pianoroll
-            # cv2.imwrite(filename.replace(".png", "pianoroll.png"), pianoroll.transpose(2, 0, 1)[::-1, :, :])
-        if pianoroll_activity is not None:
-            if pianoroll_activity.ndim == 2:
-                pianoroll_activity = np.repeat(pianoroll_activity[:, None, :], 3, axis=1)
-            pianoroll_image[pianoroll_activity.astype(bool)] = 255
-        if pianoroll_image is not None:
-            image = np.concatenate([image, sep_stripe, pianoroll_image.transpose(2, 0, 1)[::-1, :, :]], axis=0)
-        if active_keys is not None:
-            assert pianoroll is not None, "Need pianoroll to print active keys on it"
-            active_keys_image = pianoroll.transpose(2, 0, 1).copy()
-            for frame in range(active_keys.shape[0]):
-                for key in range(active_keys.shape[1]):
-                    if active_keys[frame, key]:
-                        active_keys_image[frame, self._key_borders[key][0]:self._key_borders[key][1], 1] = 255  # color green
-            image = np.concatenate([image, sep_stripe, active_keys_image[::-1, :, :]], axis=0)
-        for key in self._key_borders.values():  # red border lines
-            image[:, key[0], -1] = 255
-            image[:, key[1], -1] = 255
-        cv2.imwrite(filename, image)
+        box = np.zeros(self._ref_stripe.shape[0])
+        box[start:start+width] = 1
+        diffs = self._key_matrix - box[:, None]
+        least_diff = np.min(np.abs(diffs).sum(axis=0))
+        least_diff_key = np.argmin(np.abs(diffs).sum(axis=0))
+        diffs_white = self._key_matrix_white - box[:, None]
+        least_diff_white = np.min(np.abs(diffs_white).sum(axis=0))
+        least_diff_white_key = np.argmin(np.abs(diffs_white).sum(axis=0))
+        least_diff_white_key = self._white_to_real_key[least_diff_white_key]
+        if least_diff_white < least_diff:
+            return least_diff_white_key
+        else:
+            return least_diff_key
+
+    def is_white_key(self, key: int) -> bool:
+        """
+        Check whether the given key is white.
+        """
+        average_gray = self._ref_stripe[self._key_borders[key][0]:self._key_borders[key][1]].mean()
+        return average_gray > 255 / 2
 
     def add_keyboard_to_image(self, img: np.ndarray, add_borders: bool = True) -> np.ndarray:
         """
@@ -153,16 +154,16 @@ class Pianoroll:
                             (x + key * white_key_width + offset, y + start, white_key_width, end - start)
                         )
 
-    def get_notes_pixel(self) -> np.ndarray:
+    def get_notes(self, keyboard: Keyboard) -> np.ndarray:
         """
-        Get notes from the pianoroll. Notes are represented by their pixel position.
+        Get notes from the pianoroll.
         """
         notes = []
         for note_box in self.note_boxes:
             x, y, w, h = note_box
             notes.append({
                 "hand": "right",
-                "key": x + w // 2,
+                "key": keyboard.note_box_to_key(x, w),
                 "start": y,
                 "duration": h,
             })
@@ -224,14 +225,15 @@ class Notes:
         """
         video.visualize_video("images/keyboard_regions.png")
         keyboard_video = video.get_keyboard_stripe()  # shape (width, rgb, frames)
+        keyboard_white_video = video.get_keyboard_white_stripe()  # shape (width, rgb, frames)
         pianoroll_video = video.get_pianoroll_stripe()  # shape (width, rgb, frames)
-        keyboard = Keyboard(keyboard_video.mean(axis=-1))
+        keyboard = Keyboard(keyboard_video.mean(axis=-1), keyboard_white_video.mean(axis=-1))
 
         pianoroll = Pianoroll(pianoroll_video, video.frame_rate)
-        notes = pianoroll.get_notes_pixel()
+        notes = pianoroll.get_notes(keyboard)
+        notes.key += key_offset
         notes.start = notes.start / video.frame_rate * tempo / 60
         notes.duration = notes.duration / video.frame_rate * tempo / 60
-        notes.key = notes.key.map(keyboard.pixel_to_key) + key_offset
         if right_hand_boundary:
             notes.hand = "right"
             notes.hand = notes.hand.where(notes.key >= right_hand_boundary, "left")

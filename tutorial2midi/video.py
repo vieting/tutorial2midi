@@ -16,6 +16,7 @@ class Video:
         self.frame_rate = 0.0
         self._data = self.read_frames(filename)  # shape (height, width, RGB channels, frames)
         self._keyboard_idx = 500  # TODO: hard-coded
+        self._keyboard_white_idx = 620  # TODO: hard-coded
         self._pianoroll_idx = 480  # TODO: hard-coded
 
     def read_frames(self, filename: str) -> np.ndarray:
@@ -31,9 +32,15 @@ class Video:
 
     def get_keyboard_stripe(self) -> np.ndarray:
         """
-        Cut vertical stripe from video that represents the keyboard and return frames.
+        Cut vertical stripe from video that represents the keyboard in a region with black and white keys.
         """
         return self._data[self._keyboard_idx, :, :]
+
+    def get_keyboard_white_stripe(self) -> np.ndarray:
+        """
+        Cut vertical stripe from video that represents the keyboard in a region with only white keys.
+        """
+        return self._data[self._keyboard_white_idx, :, :]
 
     def get_pianoroll_stripe(self) -> np.ndarray:
         """
@@ -48,6 +55,7 @@ class Video:
         if frame is None:
             frame = self._data.shape[-1] // 2
         image = self._data[..., frame].copy()
-        image[self._keyboard_idx, :, -1] = 255  # red
-        image[self._pianoroll_idx, :, -1] = 255  # red
+        image[self._keyboard_idx, :, :] = [0, 0, 255]  # red
+        image[self._keyboard_white_idx, :, :] = [0, 0, 255]  # red
+        image[self._pianoroll_idx, :, :] = [0, 0, 255]  # red
         cv2.imwrite(filename, image)
