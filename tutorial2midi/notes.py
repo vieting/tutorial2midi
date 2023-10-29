@@ -60,11 +60,12 @@ class Keyboard:
         if pianoroll_image is not None:
             image = np.concatenate([image, sep_stripe, pianoroll_image.transpose(2, 0, 1)[::-1, :, :]], axis=0)
         if active_keys is not None:
-            active_keys_image = np.zeros((active_keys.shape[0], image.shape[1], 3))
+            assert pianoroll is not None, "Need pianoroll to print active keys on it"
+            active_keys_image = pianoroll.transpose(2, 0, 1).copy()
             for frame in range(active_keys.shape[0]):
                 for key in range(active_keys.shape[1]):
                     if active_keys[frame, key]:
-                        active_keys_image[frame, self._keys[key][0]:self._keys[key][1], :] = 255
+                        active_keys_image[frame, self._keys[key][0]:self._keys[key][1], 1] = 255  # color green
             image = np.concatenate([image, sep_stripe, active_keys_image[::-1, :, :]], axis=0)
         for key in self._keys.values():  # red border lines
             image[:, key[0], -1] = 255
