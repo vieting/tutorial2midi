@@ -132,7 +132,13 @@ def process_pianoroll(pianoroll: np.ndarray) -> np.ndarray:
     return pianoroll
 
 
-def get_notes_from_video(video: Video, tempo: int, quantization: int, key_offset: int = 21) -> pd.DataFrame:
+def get_notes_from_video(
+        video: Video,
+        tempo: int,
+        quantization: int,
+        key_offset: int = 21,
+        anacrusis: float = 0.0,
+) -> pd.DataFrame:
     """
     Extract notes from the video.
     """
@@ -171,4 +177,5 @@ def get_notes_from_video(video: Video, tempo: int, quantization: int, key_offset
     notes.start = np.round(notes.start * quantization) / quantization
     notes.duration = np.round(notes.duration * quantization) / quantization
     notes = notes[notes.duration > 0]
+    notes.start += 4 * (anacrusis // 4 + 1) - anacrusis
     return notes
