@@ -40,7 +40,7 @@ class Keyboard:
             self,
             filename: str,
             pianoroll: Optional[np.ndarray] = None,
-            pianoroll_proc: Optional[np.ndarray] = None,
+            pianoroll_activity: Optional[np.ndarray] = None,
             active_keys: Optional[np.ndarray] = None,
     ):
         """
@@ -48,14 +48,17 @@ class Keyboard:
         """
         image = np.repeat(self._ref_stripe[None, ...], 100, axis=0)
         sep_stripe = np.ones((1, image.shape[1], 3)) * 255
+        pianoroll_image = None
         if pianoroll is not None:
             if pianoroll.ndim == 2:
                 pianoroll = np.repeat(pianoroll[:, None, :], 3, axis=1)
-            image = np.concatenate([image, sep_stripe, pianoroll.transpose(2, 0, 1)[::-1, :, :]], axis=0)
-        if pianoroll_proc is not None:
-            if pianoroll_proc.ndim == 2:
-                pianoroll_proc = np.repeat(pianoroll_proc[:, None, :], 3, axis=1)
-            image = np.concatenate([image, sep_stripe, pianoroll_proc.transpose(2, 0, 1)[::-1, :, :] * 255], axis=0)
+            pianoroll_image = pianoroll
+        if pianoroll_activity is not None:
+            if pianoroll_activity.ndim == 2:
+                pianoroll_activity = np.repeat(pianoroll_activity[:, None, :], 3, axis=1)
+            pianoroll_image[pianoroll_activity.astype(bool)] = 255
+        if pianoroll_image is not None:
+            image = np.concatenate([image, sep_stripe, pianoroll_image.transpose(2, 0, 1)[::-1, :, :]], axis=0)
         if active_keys is not None:
             active_keys_image = np.zeros((active_keys.shape[0], image.shape[1], 3))
             for frame in range(active_keys.shape[0]):
