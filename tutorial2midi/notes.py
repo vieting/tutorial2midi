@@ -137,6 +137,7 @@ def get_notes_from_video(
         tempo: int,
         quantization: int,
         key_offset: int = 21,
+        right_hand_boundary: int = 60,
         anacrusis: float = 0.0,
 ) -> pd.DataFrame:
     """
@@ -161,7 +162,7 @@ def get_notes_from_video(
     for key in range(active_keys.shape[1]):
         for borders in get_range_borders(active_keys[:, key]):
             notes.append({
-                "hand": "right",
+                "hand": "right" if key + key_offset >= right_hand_boundary else "left",
                 "key": key + key_offset,
                 "start": borders[0],
                 "duration": borders[1] - borders[0],

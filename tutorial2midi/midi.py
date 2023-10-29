@@ -18,7 +18,7 @@ class MIDIWrapper:
         for track in [0, 1]:
             self._midi.addTempo(track, 0.0, tempo)
 
-    def add_notes(self, notes: pd.DataFrame, channel: int = 0, volume: int = 100):
+    def add_notes(self, notes: pd.DataFrame, volume: int = 100):
         """
         Add notes from dataframe to MIDI file.
 
@@ -27,8 +27,8 @@ class MIDIWrapper:
         hand_mapping = {"right": 0, "left": 1}
         for index, note in tqdm.tqdm(notes.iterrows(), desc="Add notes", unit="notes"):
             self._midi.addNote(
+                0,
                 hand_mapping[note.hand],
-                channel,
                 note.key,
                 note.start,
                 note.duration,
