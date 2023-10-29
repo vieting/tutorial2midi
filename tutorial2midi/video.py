@@ -47,7 +47,7 @@ class Video:
         """
         if frame is None:
             frame = self._data.shape[-1] // 2
-        image = self._data[..., frame]
+        image = self._data[..., frame].copy()
         image[self._keyboard_idx, :, -1] = 255  # red
         image[self._pianoroll_idx, :, -1] = 255  # red
         cv2.imwrite(filename, image)

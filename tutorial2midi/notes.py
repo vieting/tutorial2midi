@@ -36,17 +36,36 @@ class Keyboard:
                 border = idx + 1
         self._keys[key] = (border, borders.size)
 
-    def visualize_ref_keyboard_with_borders(self, filename: str, pianoroll: Optional[np.ndarray] = None):
+    def visualize_ref_keyboard_with_borders(
+            self,
+            filename: str,
+            pianoroll: Optional[np.ndarray] = None,
+            pianoroll_proc: Optional[np.ndarray] = None,
+            active_keys: Optional[np.ndarray] = None,
+    ):
         """
         Helper to plot the keyboard along with the detected borders to help debugging.
         """
-        keys_image = np.repeat(self._ref_stripe[None, ...], 100, axis=0)
-        border_image = np.zeros(keys_image.shape)
-        for key in self._keys.values():
-            border_image[:, key[0], :] = 255
-        image = np.concatenate([keys_image, border_image], axis=0)
+        image = np.repeat(self._ref_stripe[None, ...], 100, axis=0)
+        sep_stripe = np.ones((1, image.shape[1], 3)) * 255
         if pianoroll is not None:
-            image = np.concatenate([image, pianoroll], axis=0)
+            if pianoroll.ndim == 2:
+                pianoroll = np.repeat(pianoroll[:, None, :], 3, axis=1)
+            image = np.concatenate([image, sep_stripe, pianoroll.transpose(2, 0, 1)[::-1, :, :]], axis=0)
+        if pianoroll_proc is not None:
+            if pianoroll_proc.ndim == 2:
+                pianoroll_proc = np.repeat(pianoroll_proc[:, None, :], 3, axis=1)
+            image = np.concatenate([image, sep_stripe, pianoroll_proc.transpose(2, 0, 1)[::-1, :, :] * 255], axis=0)
+        if active_keys is not None:
+            active_keys_image = np.zeros((active_keys.shape[0], image.shape[1], 3))
+            for frame in range(active_keys.shape[0]):
+                for key in range(active_keys.shape[1]):
+                    if active_keys[frame, key]:
+                        active_keys_image[frame, self._keys[key][0]:self._keys[key][1], :] = 255
+            image = np.concatenate([image, sep_stripe, active_keys_image[::-1, :, :]], axis=0)
+        for key in self._keys.values():  # red border lines
+            image[:, key[0], -1] = 255
+            image[:, key[1], -1] = 255
         cv2.imwrite(filename, image)
 
     def get_active_keys(self, pianoroll: np.ndarray) -> np.ndarray:
@@ -56,8 +75,6 @@ class Keyboard:
         active_keys = np.zeros((pianoroll.shape[-1], len(self._keys)), bool)
         for key, borders in self._keys.items():
             active_keys[:, key] = pianoroll[borders[0]:borders[1], ...].any(axis=0)
-        # keys_image = np.repeat(active_keys[..., None], 3, axis=-1) * 255
-        # cv2.imwrite("images/active_keys.png", keys_image)
         return active_keys
 
 
@@ -117,14 +134,20 @@ def get_notes_from_video(video: Video, tempo: int, quantization: int) -> pd.Data
     Extract notes from the video.
     """
     video.visualize_video("images/keyboard_regions.png")
-    keyboard_video = video.get_keyboard_stripe()
-    pianoroll_video = video.get_pianoroll_stripe()
+    keyboard_video = video.get_keyboard_stripe()  # shape (width, rgb, frames)
+    pianoroll_video = video.get_pianoroll_stripe()  # shape (width, rgb, frames)
     keyboard = Keyboard(keyboard_video.mean(axis=-1))
-    # keyboard.visualize_ref_keyboard_with_borders(
-    #     "images/keyboard.png", pianoroll_video.transpose(2, 0, 1)[::-1, :, :])
 
-    pianoroll_video = process_pianoroll(pianoroll_video)
-    active_keys = keyboard.get_active_keys(pianoroll_video)
+    pianoroll_video_proc = process_pianoroll(pianoroll_video)  # shape (width, frames)
+    active_keys = keyboard.get_active_keys(pianoroll_video_proc)  # shape (frames, keys)
+
+    keyboard.visualize_ref_keyboard_with_borders(
+        "images/keyboard_pianoroll.png",
+        pianoroll_video,
+        pianoroll_video_proc,
+        active_keys,
+    )
+
     notes = []
     for key in range(active_keys.shape[1]):
         for borders in get_range_borders(active_keys[:, key]):
@@ -140,6 +163,4 @@ def get_notes_from_video(video: Video, tempo: int, quantization: int) -> pd.Data
     notes.start = np.round(notes.start * quantization) / quantization
     notes.duration = np.round(notes.duration * quantization) / quantization
     notes = notes[notes.duration > 0]
-    # import ipdb
-    # ipdb.set_trace()
     return notes
