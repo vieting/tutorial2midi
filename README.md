@@ -3,6 +3,23 @@ tutorial2midi is a tool to convert piano tutorials in the style of a synthesia v
 This is helpful to obtain sheet music.
 Creating a pdf with sheet music from a midi file is easy using software like MuseScore.
 
+## Installation
+tutorial2midi is a regular python project.
+Just clone this repository and create an environment with the required packages, e.g. by running
+```
+git clone git@github.com:vieting/tutorial2midi.git
+cd tutorial2midi
+pip install -r requirements.txt
+```
+
+## Usage
+The main entry point is `main.py`.
+To see the available command line options, run `python main.py -h`.
+An example use case would be
+```
+python main.py /path/to/tutorial.mp4 --tempo 75 --quantization 8 --anacrusis 0.5
+```
+
 ## Related projects
 A number of related projects exist.
 The most popular one is probably [video2midi](https://github.com/svsdval/video2midi).
